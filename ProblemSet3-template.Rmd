@@ -1,0 +1,378 @@
+---
+title: "Analysis on the popular vote of the 2020 American federal election"
+author: "Yena Joo, Woolim Kim, Guemin Kim"
+date: "Nov 2, 2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+# please install the following package prior to knitting 
+# install.packages("kableExtra")
+library(tidyverse)
+library(lme4)
+library(knitr)
+library(kableExtra)
+
+# Loading in the cleaned survey Data
+survey_data <- read_csv("survey_data.csv")
+
+# exclude responses from those who are not eligible to vote
+survey_data <- survey_data %>% filter(vote_intention != "No, I am not eligible to vote")
+
+# Loading in the cleaned census Data
+census_data <- read_csv("census_data.csv")
+
+```
+
+### Predictions on the proportions of voters for Donald Trump and Joe Biden in the 2020 US Presidential Election based on the voter survey responses.
+*Code and data supporting this analysis is available at: https://github.com/Guemin/Problem_Set_3 *
+
+# Model
+As the 2020 presidential election of the United States approaches, people across the world are interested in to which candidate the vote of the US citizens will be concentrated, either to Donald Trump or to Joe Biden. Since the election outcome will also affect our community in Canada, we are going to analyze and predict the winner of the popular vote in the 2020 American federal election.  
+
+Using the survey and census data obtained from Democracy Fund + UCLA Nationscape and IPUMS USA, we are going to predict the popular vote outcome of the election. To be more specific, we are going to use two logistic regression models, one for each candidate using the survey data, and employ a post-stratification technique^[Post-stratification is a technique used in sample survey design to improve the quality of population estimates. In the post-stratification analysis, the population is partitioned into subgroups, and estimates are predicted within the subgroups. Then, the sum of the estimate times the respective population size in each group is calculated, and finally, it is divided by the sum of the total population size. Detailed procedures on post-stratification for our analysis will be shown in the following sub-sections.] with the models using the census data. 
+Then, we will predict the winner of the election in each state, using a post-stratification outcome and compare it with the popular vote prediction.
+
+In the following sub-sections, we will describe the model specifics, the post-stratification calculation, and the result of the analysis.
+
+## Model specifics
+
+As already mentioned, we will be using the logistic regression models^[glm() function in the “lme4” package is used to make the logistic regression model.] and post-stratification technique with R software to predict the proportions of voters who will vote for either Donald Trump or Joe Biden. Specifically, we will create two models, each for proportions of voters for Trump or Biden, using 6 different variables(age_group, gender, race, education, household_income, and state)^[* age_group is divided into 4 different groups: "18-29 years old", "30-44 years old", "45-64 years old", "65 years and older".  
+\    \    \ * gender indicates either "Male" or "Female".  
+\    \    \ * race is divided into 5 different categories: "White", "Black", "Native", "Asian", "Other".  
+\    \    \ * education is divided into 4 different categories: "Didn't graduate from high school", "High school graduate",   
+\    \    \   "Some college or associate degree", "Bachelor's degree or higher".  
+\    \    \ * household income consists of 9 categories ranging from "Less than $14,999" to "$150,000 and over".  
+\    \    \ * state indicates abbreviated names of 52 states in the US.].  
+
+To briefly explain, we will include demographic variables such as age group, gender, race, and educational attainment in the models; here, we will organize ages by categorizing them into different age groups.
+Also, we will include the household income variable to see how the campaign promises of each candidate affect the voters with different income, and state variable to compare the winner in each state.
+
+Since our response variables, vote_Trump and vote_Biden, are binary(either 'vote for' or 'not vote/not sure'), the logistic regression model^[Logistic regression is a mathematical model used to estimate the probability of an event occurring using binary data.] is a suitable model to be used.   
+The equation for logistic regression models we are using is:
+
+$$ log(\frac{p_{i}}{1-p_{i}}) = \beta_0+\beta_1  x_{age\ group} +\beta_2 x_{gender}+\beta_3 x_{race}+\beta_4x_{education}+\beta_5x_{household\ income}+\beta_6x_{state}\ \ \ (1)$$
+
+where $log(\frac{p_{i}}{1-p_{i}})$ represents log odds in each model, and $p_{i}$ is the proportion of voters who will vote for Donald Trump or Joe Biden. Similarly, $\beta_0$ represents the intercept, and $\beta_1$,...,  $\beta_6$ indicates the slope parameters of the model. (Detailed descriptions on the x variables can be found in the footnote^[* $x_{age\ group}$ represents one of the four age groups that the respondent is in.  
+\    \    \ * $x_{gender}$ indicates the gender of the respondent(either "Male" or "Female").  
+\    \    \ * $x_{race}$ indicates the race-ethnicity of the respondent.  
+\    \    \ * $x_{education}$ indicates the education attainment of the respondent.  
+\    \    \ * $x_{household\ income}$ indicates the total pre-tax income of the respondent's household.  
+\    \    \ * $x_{state}$ indicates the state in which the respondent is located.]).  
+
+
+
+```{r, include=FALSE, warning= FALSE, message=FALSE}
+#remove na observations from the survey data
+survey_data <- survey_data %>%
+  filter(!is.na(age_group), !is.na(gender), !is.na(race), !is.na(education), !is.na(household_income), !is.na(state), !is.na(vote_Trump), !is.na(vote_Biden))
+# create logistic regression models for each candidate
+
+#vote for Trump
+model_trump <- glm(vote_Trump ~ as.factor(age_group) + as.factor(gender) + as.factor(race) + as.factor(education) + as.factor(household_income) + as.factor(state), data=survey_data, family="binomial")
+
+#voting for Biden
+model_biden <- glm(vote_Biden ~ as.factor(age_group) + as.factor(gender) + as.factor(race) + as.factor(education) + as.factor(household_income) + as.factor(state), 
+            data=survey_data, family="binomial")
+```
+
+### Data Cleaning Process 
+Prior to the modelings, we mutated variables in the survey data to create new variables that could be used in the analysis. Our response variables, vote_Trump and vote_Biden are also mutated from a variable named "vote_2020", which provides a name of a candidate that the respondent supports^[vote_Trump is 1 when vote_2020 is "Donald Trump", and 0 otherwise; vote_Biden is 1 when vote_2020 is "Joe Biden", and 0 otherwise.]. Also, the predictor variables, age_group, gender, race, education, household_income, and state are mutated in the data cleaning process so that the categories in each variable in the survey data match with those in the census data.  
+Since only those who are 18 years old or older are eligible to vote, we removed the observations obtained from the respondents who are younger than 18 years old in the data cleaning process. Similarly, we removed the observations of respondents who answered "No, I am not eligible to vote" as vote_intention, since their responses to vote_Trump and vote_Biden will not count in the actual election. Also, we removed people who are "less than 1 year old" or "90 (90+ in 1980 and 1990)" since their responses are unrealistic or not necessary in our analysis.   
+
+
+
+### Model Diagnostics 
+With the logistic regression models we created above, we are going to study the diagnostics of the models.
+First, we need to keep in mind that logistic regressions are well performed under the following assumptions:  
+
+1. Linearity between the log odds and the predictor variables  
+   (independent variables should be linearly related to the log odds)  
+2. Binary response variable  
+   (Binary logistic regression requires the response variable to be binary)  
+3. Large sample size  
+4. Multicollinearity among predictors is not too high  
+   (predictor variables should be independent of each other)   
+   
+In our models, we do not need to worry about the violation of the first assumption since all of our predictor variables are categorical; hence, no further categorization of the independent variables is necessary.  
+Similarly, since our response variables, vote_Trump and vote_Biden are binary, and the size of the survey data is large enough, we can confirm that the second and the third assumptions are also satisfied.  
+
+Now, we want to check if the multicollinearity among predictor variables is not too high. This can be done by calculating the variance inflation factor(VIF) for each predictor variable, which measures the amount of multicollinearity in a set of multiple regression variables; the bigger the VIF, the bigger the multicollinearity is. When the variance inflation factor is greater than 5, the corresponding predictor is said to be highly correlated with other predictors. 
+Here are the values of variance inflation factors for predictors in each model:  
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Model diagnostics
+## check for multicollinearity of predictors in each model
+vif_mod_t <- tibble(model_trump_predictor = c("age_group", "gender", "race", "education",
+                                  "household_income", "state"), 
+                    VIF = car::vif(model_trump)[,1])
+vif_mod_b <- tibble(model_biden_predictor = c("age_group", "gender", "race", "education",
+                                  "household_income", "state"), 
+                    VIF = car::vif(model_biden)[,1])
+## create a VIF model table
+kable(
+  list(vif_mod_t, vif_mod_b),
+  caption = 'VIF models',
+  booktabs = TRUE, 
+  valign = 't'
+)%>%
+kable_styling(latex_options = "hold_position")
+
+```
+As shown above, VIF values do not exceed 2 in both models for Trump and Biden, which suggest that there is no sign of multicollinearity among predictors. Therefore, it is safe to say that the last assumption is also satisfied.
+
+
+## Post-Stratification 
+
+Using the log odds estimates, we are going to find vote_Trump and vote_Biden (the proportions of voters each for Donald Trump and Joe Biden) in every possible combination of categories in our predictor variables, age_group, gender, race, education, household_income, and state.
+
+In order to estimate the proportions of voters for both Donald Trump and Joe Biden, we are going to perform a post-stratification analysis. First, we need to subdivide the population having similar characteristics into cells. Hence, we are going to create a total of 55,325 cells based on different age groups, gender, race-ethnicity, education attainment, household income, and state.  
+Using the logistic regression models presented in the previous sub-section, we will estimate the proportions of voters in each cell for each candidate. Then, we will weigh each estimate within each cell by the respective population size of the cell, and sum those values, and divide that by the entire population size. This process can also be described by the expression:
+$$\hat{y}^{ps}\ =\ \frac{\sum N_j*\hat{y_j}}{\sum{N_j}}\ \ \ \ \ (2)$$
+where $\hat{y_j}$ is the estimate of the proportion of voters voting for either Trump or Biden in each cell, and $N_j$ is the population size of the $j^{th}$ cell-based on demographics.  
+
+After finding the total estimates of the proportions of voters for the two candidates, we will group the estimates by state; this will help us to perform somewhat similar prediction to the electoral vote since we can predict who will win the vote in each state. We will also find the estimates for each household_income group, to see if the income affects people's decision on their voting preferences.  
+
+```{r include = FALSE, warning = FALSE, message=FALSE}
+# Post-Stratification
+
+###yps for glm Trump 
+census_data$logodds_estimate_trump <-
+  model_trump %>%
+  predict(newdata = census_data)
+
+census_data$estimate_trump <-
+  exp(census_data$logodds_estimate_trump)/(1+exp(census_data$logodds_estimate_trump))
+
+#overall prediction for Trump
+predict_trump <- 
+census_data %>%
+  filter(!is.na(estimate_trump))%>%
+  mutate(total_vote_prop_trump = estimate_trump*count) %>%
+  summarise(total_predict_trump = sum(total_vote_prop_trump)/sum(count))
+
+#using group_by(income)
+predict_income_trump <- 
+census_data %>%
+  filter(!is.na(estimate_trump))%>%
+  mutate(vote_prop_trump = estimate_trump*count) %>%
+  group_by(household_income)%>%
+  summarise(predict_trump= sum(vote_prop_trump)/sum(count))
+
+#using group_by(state)
+predict_state_trump <- 
+census_data %>%
+  filter(!is.na(estimate_trump))%>%
+  mutate(vote_prop_trump2 = estimate_trump*count) %>%
+  group_by(state)%>%
+  summarise(predict_trump2= sum(vote_prop_trump2)/sum(count))
+
+###yps for glm Biden
+census_data$logodds_estimate_biden <-
+  model_biden %>%
+  predict(newdata = census_data)
+
+census_data$estimate_biden <-
+  exp(census_data$logodds_estimate_biden)/(1+exp(census_data$logodds_estimate_biden))
+
+#overall prediction for Biden
+predict_biden <- 
+census_data %>%
+  filter(!is.na(estimate_biden))%>%
+  mutate(total_vote_prop_biden = estimate_biden*count) %>%
+  summarise(total_predict_biden = sum(total_vote_prop_biden)/sum(count))
+
+#using group_by(income)  
+predict_income_biden <-
+census_data %>%
+  filter(!is.na(estimate_biden))%>%
+  mutate(vote_prop_biden = estimate_biden*count) %>%
+  group_by(household_income)%>%
+  summarise(predict_biden = sum(vote_prop_biden)/sum(count))
+
+#using group_by(state)
+predict_state_biden <-
+census_data %>%
+  filter(!is.na(estimate_biden))%>%
+  mutate(vote_prop_biden2 = estimate_biden*count) %>%
+  group_by(state)%>%
+  summarise(predict_biden2 = sum(vote_prop_biden2)/sum(count))
+
+```
+
+
+
+# Results
+
+In the previous sub-sections, we have created the logistic regression models on proportions of voters voting for Donald Trump and Joe Biden using 6 different variables such as age_group, gender, race, education, household_income, and state, and employed the post-stratification technique using the models.   
+
+
+**Model Summary**  
+Tables 6 and 7 in the Appendix are the summarized results of the logistic regression models of each candidate, and the p-values in each model are used to find the significance of the independent variables^[The p-value for each independent variable tests the null hypothesis that the variable has no correlation with the dependent variable. If the p-value is smaller than the significance level, you can reject the null hypothesis measures the significance of the independent variable on the dependent variable]. In Table 6(results of the regression model for Trump), "(age_group)30-44 year olds" has the largest p-value of 1.43e-09 among the categories in age_group variable, and the smallest p-value among them is 2.59e-15 for "(age_group)45-64 year olds". Hence, the age variable is highly significant to the model. Similarly, the gender variable shows a p-value of 4.10e-13 which suggests that gender is a significant variable, as well as race, household_income, and education variables.  
+
+Furthermore, as we can see in Table 7, the regression model for Biden shows a similar significance as the model for Trump; the p-values for age_group, gender, and education variables that are much smaller than the significance level of 0.05 suggest that these variables are significant.  
+
+On the other hand, from both tables, we can observe that there is at least one state that is statistically significant in both models for Trump and Biden; for example, "Vermont" has p-values of 0.0246 and 0.021 in models for Trump and Biden respectively. Therefore, we can conclude every variable is statistically significant and is going to be used in further analysis.  
+
+
+**Results of Post-Stratification**  
+Based on the result from the post-stratification analysis in Table 2, we can estimate that the proportion of voters voting for Donald Trump is 0.433 (43.3%) and Joe Biden to be 0.394(39.4%).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+#glm()Model results
+#broom::tidy(model_trump)
+#broom::tidy(model_biden)
+
+
+#Post-Stratification result
+## total probability of voting for Trump and Biden
+kable(list(predict_trump, predict_biden), caption = "Comparison of predicted estimate between Trump and Biden")%>% kable_styling(latex_options = "HOLD_position")
+
+## probabilites of voting for Trump and Biden in each household income group
+kable(list(predict_income_trump, predict_income_biden), caption = "Comparison of predicted estimate grouped by household income level")%>% kable_styling(latex_options = "HOLD_position")
+
+```
+
+**Income**  
+In Table 3, it is noticeable that the estimated proportion of voters for Trump increases as the  household income range increases. The lowest predicted value is 0.3219 (32.2%) in the income category "Less than $14,999" and the highest predicted estimate is in "\$150,000 and over" which is	0.5013 (50.13%).  
+
+For Biden, there is no strong deviation shown between the estimates in different household income categories. The proportions of voters voting for Biden in each income level sit in the range between 0.3644 (Income level "\$100,000 to \$149,999") and 0.4306 ("\$75,000 to $99,999").  
+
+The result shows individuals with income "Less than \$14,999" are more likely to vote for Biden (39.31%) over Trump(32.19%), and the individuals with income "\$150,000 and over" are more likely to vote for Trump (50.13%) over Biden (37.46%).  
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#compare the estimate for each state
+trump_state <- predict_state_trump$predict_trump2
+biden_state <- predict_state_biden$predict_biden2
+trump_win <- 0 
+biden_win <- 0
+trump_biden <- c()
+for (i in 1:51){
+  if (trump_state[i] > biden_state[i]){
+    trump_win <- trump_win + 1
+    trump_biden <- c(trump_biden, "Trump")
+  }
+  else {biden_win <- biden_win + 1
+  trump_biden <- c(trump_biden, "Biden")
+}}
+## make histogram of the result
+ggplot(data.frame(trump_biden), aes(x=trump_biden)) +
+  geom_bar(width = 0.3) + ggtitle("Figure 1: Predicted Win Counts Per State") + xlab("Biden | Trump") + ylab("Count") + theme(plot.margin = margin(1.4,0.8,1.4,0.8, "cm"))
+
+
+# compare proportions of voters in swing states
+swing_states <- c("NC", "FL", "PA", "MI", "AZ", "WI", "OH")
+predict_trump_swing <- predict_state_trump %>% filter(`state` %in% swing_states)
+predict_biden_swing <- predict_state_biden %>% filter(`state` %in% swing_states)
+kable(list(predict_trump_swing, predict_biden_swing), caption = "Comparison of predicted estimates between Trump and Biden in swing states")%>%
+kable_styling(latex_options = "hold_position")
+
+```
+
+**State**  
+Since the post-stratification result includes proportions of voters for each candidate in all of the 51 states in America^[Check Appendix for the full result], we are only going to talk about some noteworthy outcomes instead of going over estimates in every single state. More specifically, for each state, we will compare Trump and Biden's $\hat{y}^{ps}$ values, and consider whoever has the greater proportion of voters wins in the state.  
+
+The histogram(Figure 1) above shows the predicted win counts per state. Here, we can see that Trump is expected to win in 31 states, whereas Biden has a higher proportion of voters in the other 20 states. However, not every win weighs the same, because every state has a different number of electoral votes. Since we are not given any information about the weight of each state, we are instead going to compare the proportion in the Swing States.  
+
+Swing States such as North Carolina, Florida, Pennsylvania, Michigan, Arizona, Wisconsin, and Ohio are the key battleground states where it is unclear who the winner will be. Table 4 shows a brief result of the proportions of voters for each candidate in each swing state; here, we can observe that Trump is expected to get the inside track in most of the states, except for Michigan(0.4562) and Wisconsin(0.4124), where Biden is expected to have a higher proportion to get voted with 0.4562(45.62%) and 0.4124(41.24%).  
+Table 4 also expects Trump to win by a landslide, since he wins 4 states out of 6 major swing states. 
+
+
+# Discussion
+
+Using the 2020 survey data and the 2018 census data obtained from Democracy Fund + UCLA Nationscape and IPUMS USA, we have predicted the popular vote outcome of the 2020 presidential election in the USA. In the "Model Specifics" section, logistic regression models are used to predict the candidate who is more likely to win the popular vote in the election, with explanatory variables age_group, gender, race, education, household_income, and state. However, one thing to note regarding the models is that there is a possibility of having omitted variable bias^[* explanation of omitted variable bias is described in "Weakness section"] and measurement error bias since some people could try to hide their political orientation and give false information. 
+
+We then checked if the logistic regression models satisfy all the assumptions in the "Model diagnostic" part, as well as the significance of the models in the "Result" section. After fitting the models, we employed the post-stratification analysis in which the census data is partitioned into 55,325 cells - based on the same 6 variables used in the logistic regression models - and the proportions of voters for each candidate are estimated within each cell. Using the estimates in each cell, the total proportions of voters for both Donald Trump and Joe Biden, $\hat{y}^{ps}$, are measured to predict the winner of the popular vote.  
+The result shows that the estimated value $\hat{y}^{ps}$ for Joe Biden is 39.4% and for Donald Trump is 43.34%, which suggests that Trump is more likely to win the popular vote.   
+
+Moving on, the result in Table 3 (where we grouped the estimates of proportion by household income level) shows that individuals with the income "Less than \$14,999" are more likely to vote for Biden (39.31%) over Trump(32.19%). On the other hand, Trump is expected to have a higher proportion of getting voted from individuals with higher household income level; individuals with the income "\$150,000 and over" tend to vote for Trump by 50.13%. These outcomes may possibly be affected by the campaign promises of each candidate; for example, Biden's promise of raising taxes for those with income greater than $400,000 could affect people with higher income to not vote for him. On the other hand, people in the lower income ranges could possibly support Biden due to his promise of subsidizing health insurance for lower income people not receiving Medicare or Medicaid^[Medicare and Medicaid are the federal programs that provide health coverage to people who meet the criteria].
+
+Furthermore, we grouped the cell estimates by states and predicted the candidate who is expected to win in each state. The result in Figure 1 shows that Trump has greater probabilities to win in 31 states, whereas Biden has higher probabilities to win in 20 states; Trump is ahead of Biden by 11 states. Also, as already explained in the "Result" section, the outcome in the Swing States shows that Trump is expected to win in 4 out of 6 swing states, provided in Table 4. By comparing the results in the Swing states for both candidates, we predict that Trump is more likely to win in the states with more electoral votes. The "grouping by states" method along with the comparisons of the estimates between the swing states provides us with better intuition of what the expected result could be in the actual election since the method is more accurate to the electoral voting method than the popular vote previously done in the analysis. Likewise, both popular vote and "grouping by states" vote predict Trump to win in the 2020 presidential election.  
+
+To sum up, the overall results from the post-stratification analysis suggest that Donald Trump is more likely to win the popular vote in the 2020 US presidential election. However, this is just an estimation based on the given data sets which do not provide enough information required for predicting the winner of the electoral vote^[The US presidential election actually uses the electoral college vote. There are 538 electors in the electoral college, divided among each state.]. Historically, in 2016, Hillary Clinton won the popular vote but lost the election, because Trump won the Electoral College. Therefore, winning the popular vote does not determine the next president of the USA.  
+
+## Weaknesses
+
+One of the weaknesses in our analysis is regarding the omitted variables.
+In the data cleaning process, some of the variables were removed from the data sets prior to the modeling, because either the census data or the survey data did not include the particular variables. If there were any important variables among the omitted ones, that could affect the vote outcome and there might also exist an omitted variable bias in our models. (The omitted variables could be correlated with the dependent variable in the model). This can be improved by choosing a new census data that contains predictor variables that could potentially affect the election outcome.
+
+Moving on, another weakness in our analysis is regarding the census data.
+Since the census data used in the analysis is the 2018 data, it might not reflect the population in 2020 or predict the election outcome most accurately. For example, in our analysis, those who are not eligible to vote(back in 2018) were omitted from the data set, however, they could be eligible to vote in the 2020 election. Hence, if the 2020 census data was available, it should be more suitable for our analysis.
+
+Lastly, we should note that our prediction on the winner of the popular vote could not match with the winner of the electoral college. Even if a candidate wins in the public vote, it is the result of the electoral college that determines the next president of the USA. Therefore, analyzing the winner of the popular vote is not the most accurate way to predict the winner of the presidential election. One way to mitigate this issue is to additionally include a new data set that contains survey responses of electors in the electoral college, and predict the winner of the electoral college.  
+
+
+## Next Steps
+
+The analysis does not take into account the possible effect of other factors - such as an individual's Health insurance state - in the vote result. Analyzing the vote outcome by focusing more on the election promise would give a more realistic and reasonable prediction of the election. Also, since the 2018 census data used for the analysis does not reflect the most accurate population, we can try using the 2020 census data in the future, so that we could estimate the proportion of voting for each candidate by the factors that are closely related to the election promises such as health care, market industry, etc.    
+
+Also, for future analysis, we can get surveys and census data about the electoral college and do a similar analysis using them. Then, we can compare it with the original analysis that was done in this report.  
+
+Lastly, we can compare our predictions with the 2020 presidential election outcomes and see if our predictions were accurate enough compared to the actual results.  
+
+
+
+\newpage
+
+# References (MLA8)
+1. Survey data: 
+“Insights into the Beliefs and Behaviors of American Voters.” Democracy Fund Voter Study Group, www.voterstudygroup.org/downloads?key=9337162e-e5ef-49d7-96fd-48a5c5dba31c. 
+
+2. Census data:
+"Census Data." IPUMS USA: Extract Summary, usa.ipums.org/usa-action/extract_requ
+ests/summary.
+
+3. Post-Stratification technique: 
+Wang, Wei, et al. “Forecasting Elections with Non-Representative Polls.” International Journal of Forecasting, vol. 31, no. 3, 2015, pp. 980–991., doi:10.1016/j.ijforecast.2014.06.001. 
+
+4. Logit Regression Assumptions source 1: https://rpubs.com/guptadeepak/logit-assumptions
+Gupta, Deepak. “Logit Reression Assumptions.” RPubs, 18 May 2018, rpubs.com/guptadeepak/logit-assumptions. 
+
+5. Logit Regression Assumptions source 2: "Assumptions of Logistic Regression." pp.1-2., https://www.statisticssolutions.com/wp-content/uploads/wp-post-to-pdf-enhanced-cache/1/assumptions-of-logistic-regression.pdf
+
+6. Variance Inflation Factor(VIF):
+Stephanie. “Variance Inflation Factor.” Statistics How To, 9 July 2020, www.statisticshowto.com/variance-inflation-factor/. 
+
+7. Tables side by side: 
+Yihui Xie, Christophe Dervieux. “R Markdown Cookbook.” 10.1 The Function Knitr::Kable(), 21 Sept. 2020, bookdown.org/yihui/rmarkdown-cookbook/kable.html. 
+
+8. Comparing the campaign promises of Trump and Biden: D'Souza, Deborah. “Comparing the Economic Plans of Trump and Biden.” Investopedia, Investopedia, 23 Oct. 2020, www.investopedia.com/comparing-the-economic-plans-of-trump-and-biden-4843240. 
+
+9. Making plots side by side: “R Multiple Plot Using Par() Function.” DataMentor, 8 Oct. 2018, www.datamentor.io/r-programming/subplot/. 
+
+10. Hold kable position: Justas MundeikisJustas Mundeikis, et al. “Rmarkdown Setting the Position of Kable.” 1 Feb. 1968, stackoverflow.com/questions/53153537/rmarkdown-setting-the-position-of-kable. 
+
+11. Knitr Package: Yihui Xie . knitr: A General-Purpose Package for Dynamic Report Generation in R. R package version 1.30, 2020.
+
+12. kableExtra Package: Hao Zhu. kableExtra: Construct Complex Table with 'kable' and Pipe Syntax. R package
+  version 1.2.1, 2020. https://CRAN.R-project.org/package=kableExtra
+
+13. lme4 Package: Douglas Bates, Martin Maechler, Ben Bolker, Steve Walker. Fitting Linear Mixed-Effects Models Using lme4. Journal of
+  Statistical Software, 67(1), 1-48. doi:10.18637/jss.v067.i01. 2015.
+  
+14. Omitted Variable bias: Christoph Hanck, Martin Arnold. Introduction to Econometrics with R. 15 Sept. 2020, www.econometrics-with-r.org/6-1-omitted-variable-bias.html.
+
+15. Information about the Electoral College: “US Election 2020: What Is the Electoral College?” BBC News, BBC, 27 Oct. 2020, www.bbc.com/news/world-us-canada-53558176. 
+
+# Appendix 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+## probabilites of voting for Trump and Biden in each state
+knitr::kable(list(predict_state_trump, predict_state_biden), caption = "Comparison of predicted estimate grouped by states") %>% kable_styling(latex_options = "HOLD_position") %>% kable_styling(font_size = 9)
+
+#glm()Model results
+##trump 
+tidydata_t <- broom::tidy(model_trump)
+tidy_data_trump <- tidydata_t[-c(25:55), ]
+kable(tidy_data_trump, caption = "Logistic Regression Model Results for Trump")%>% kable_styling(latex_options="scale_down")
+
+##biden 
+tidydata_b <- broom::tidy(model_biden)
+tidy_data_biden <- tidydata_b[-c(25:55), ]
+kable(tidy_data_biden, caption = "Logistic Regression Model Results for Biden")%>% kable_styling(latex_options="scale_down")
+```
+
